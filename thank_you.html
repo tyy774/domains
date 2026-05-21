@@ -1,0 +1,202 @@
+#!/usr/bin/env python3
+"""
+Локальный сервер для сайта OKAKMINE.
+Запуск: python server.py
+Сайт откроется на http://localhost:8000
+"""
+
+import http.server
+import json
+import os
+import time
+import cgi
+import socket
+import urllib.parse
+from pathlib import Path
+
+MC_HOST = "199.83.103.227"
+MC_PORT = 25834
+
+PORT = 8000
+BASE_DIR = Path(__file__).parent
+
+# Маршруты без расширения -> HTML файл
+ROUTES = {
+    "/":              "index.html",
+    "/index":         "index.html",
+    "/about":         "about.html",
+    "/shop":          "shop.html",
+    "/news":          "news.html",
+    "/thank_you":     "thank_you.html",
+    "/manual_payment":"manual_payment.html",
+}
+
+MIME_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".css":  "text/css; charset=utf-8",
+    ".js":   "application/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".png":  "image/png",
+    ".jpg":  "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".ico":  "image/x-icon",
+    ".gif":  "image/gif",
+    ".svg":  "image/svg+xml",
+    ".webp": "image/webp",
+}
+
+
+class SiteHandler(http.server.BaseHTTPRequestHandler):
+
+    def log_message(self, format, *args):
+        print(f"  {self.address_string()} - {format % args}")
+
+    # ------------------------------------------------------------------ GET --
+    def do_GET(self):
+        path = urllib.parse.urlparse(self.path).path.rstrip("/") or "/"
+
+        # API статуса Minecraft сервера
+        if path == "/api/status":
+            self.handle_mc_status()
+            return
+
+        # Красивые URL -> HTML
+        if path in ROUTES:
+            self.serve_file(BASE_DIR / ROUTES[path])
+            return
+
+        # Статические файлы (css, img, uploads, …)
+        file_path = BASE_DIR / path.lstrip("/")
+        if file_path.is_file():
+            self.serve_file(file_path)
+            return
+
+        self.send_error(404, f"Файл не найден: {path}")
+
+    # ----------------------------------------------------------------- POST --
+    def do_POST(self):
+        path = urllib.parse.urlparse(self.path).path
+
+        if path == "/save_order.php" or path == "/save_order":
+            self.handle_save_order()
+        else:
+            self.send_error(404, "Endpoint не найден")
+
+    # ------------------------------------------------------- mc status ----
+    def handle_mc_status(self):
+        try:
+            sock = socket.create_connection((MC_HOST, MC_PORT), timeout=3)
+            sock.close()
+            online = True
+        except (socket.timeout, ConnectionRefusedError, OSError):
+            online = False
+
+        body = json.dumps({"online": online}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
+    # --------------------------------------------------------- save_order ---
+    def handle_save_order(self):
+        content_type = self.headers.get("Content-Type", "")
+
+        # Парсим multipart/form-data
+        environ = {
+            "REQUEST_METHOD": "POST",
+            "CONTENT_TYPE":   content_type,
+            "CONTENT_LENGTH": self.headers.get("Content-Length", "0"),
+        }
+        form = cgi.FieldStorage(
+            fp=self.rfile,
+            headers=self.headers,
+            environ=environ,
+        )
+
+        name    = form.getvalue("name",    "")
+        email   = form.getvalue("email",   "")
+        product = form.getvalue("product", "")
+        price   = form.getvalue("price",   "")
+
+        # Файл чека
+        receipt_field = form["receipt"] if "receipt" in form else None
+        if receipt_field is None or not receipt_field.filename:
+            self.respond(400, "Нет файла чека")
+            return
+
+        # Сохраняем файл
+        uploads_dir = BASE_DIR / "uploads"
+        uploads_dir.mkdir(exist_ok=True)
+
+        filename = f"{int(time.time())}_{receipt_field.filename}"
+        file_path = uploads_dir / filename
+        file_path.write_bytes(receipt_field.file.read())
+
+        # Нормализуем название продукта (как в оригинальном PHP)
+        if product != "Проходка на сервер":
+            product = "enterense to server"
+
+        # Читаем / создаём data.json
+        data_file = BASE_DIR / "data.json"
+        if data_file.exists():
+            data = json.loads(data_file.read_text(encoding="utf-8"))
+        else:
+            data = {"data": {}}
+
+        # Новый ключ cusN
+        max_num = 0
+        for key in data["data"]:
+            if key.startswith("cus") and key[3:].isdigit():
+                max_num = max(max_num, int(key[3:]))
+        new_key = f"cus{max_num + 1}"
+
+        data["data"][new_key] = {
+            "name":    name,
+            "email":   email,
+            "product": product,
+            "price":   price,
+            "receipt": f"uploads/{filename}",
+        }
+
+        data_file.write_text(
+            json.dumps(data, ensure_ascii=False, indent=4),
+            encoding="utf-8",
+        )
+
+        self.respond(200, "OK")
+
+    # ----------------------------------------------------------- helpers ----
+    def serve_file(self, path: Path):
+        try:
+            content = path.read_bytes()
+        except OSError:
+            self.send_error(404, f"Файл не найден: {path.name}")
+            return
+
+        mime = MIME_TYPES.get(path.suffix.lower(), "application/octet-stream")
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
+    def respond(self, code: int, text: str):
+        body = text.encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+if __name__ == "__main__":
+    os.chdir(BASE_DIR)
+    server = http.server.HTTPServer(("", PORT), SiteHandler)
+    print(f"✅  Сервер запущен: http://localhost:{PORT}")
+    print("    Нажми Ctrl+C чтобы остановить\n")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n🛑  Сервер остановлен")

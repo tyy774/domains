@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Cервер OKAKMINE | Главная</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" href="img/favicon.ico" type="image/x-icon">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+
+<div class="cen"><h2 class="white">Главная</h2></div><div class="right"><!--<button type="button" onclick="adm_lk()" class="btn-back">Админ панель</button></div>-->
+<ul class="menu-buttons">
+    <li><a href="/index" class="btn-menu">Главная</a></li>
+    <li><a href="/about" class="btn-menu">О нас</a></li>
+    <li><a href="/shop" class="btn-menu">Магазин</a></li>
+    <li><a href="/news" class="btn-menu">Новости</a></li>
+</ul>
+
+<div class="mc-wrapper">
+
+    <!-- IP -->
+    <div class="minecraft-ip-container">
+        <h2>IP сервера</h2>
+        <input type="text" id="serverIP" value="mc.okakmine.fun" readonly>
+        <button onclick="copyIP()">📋 Скопировать</button>
+        <div class="alert" id="alert">IP скопирован!</div>
+    </div>
+
+    <!-- ВИДЖЕТ -->
+    <div class="minecraft-widget">
+        <img id="server-icon" class="server-icon" src="" alt="Server Icon">
+
+        <h3 class="black" id="server-status">Загрузка...</h3>
+
+        <p id="player-count"></p>
+
+        <div class="progress-bar">
+            <div id="progress-fill"></div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+function copyIP() {
+    const ipInput = document.getElementById('serverIP');
+    ipInput.select();
+    ipInput.setSelectionRange(0, 99999); // Для мобильных
+    navigator.clipboard.writeText(ipInput.value)
+        .then(() => {
+            const alertBox = document.getElementById('alert');
+            alertBox.style.display = 'block';
+            setTimeout(() => alertBox.style.display = 'none', 2000);
+        })
+        .catch(err => alert("Ошибка при копировании: " + err));
+}
+</script>
+
+<script>
+function loadServer() {
+    fetch("/api/status")
+        .then(res => res.json())
+        .then(data => {
+            const statusEl = document.getElementById("server-status");
+            const playerEl = document.getElementById("player-count");
+            const progress = document.getElementById("progress-fill");
+            const icon     = document.getElementById("server-icon");
+
+            icon.style.display = "none";
+
+            if (data.online) {
+                statusEl.textContent = "🟢 Сервер онлайн";
+                playerEl.textContent = "";
+                progress.style.width = "100%";
+            } else {
+                statusEl.textContent = "🔴 Сервер оффлайн";
+                playerEl.textContent = "";
+                progress.style.width = "0%";
+            }
+        })
+        .catch(() => {
+            document.getElementById("server-status").textContent = "Ошибка загрузки";
+        });
+}
+
+// первая загрузка
+loadServer();
+
+// автообновление каждые 10 секунд
+setInterval(loadServer, 10000);
+</script>
+</body>
+</html>

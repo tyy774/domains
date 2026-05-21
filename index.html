@@ -1,0 +1,11 @@
+DirectoryIndex index.html
+
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^index$ index.html [NC,L]
+RewriteRule ^about$ about.html [NC,L]
+RewriteRule ^shop$ shop.html [NC,L]
+RewriteRule ^news$ news.html [NC,L]
+RewriteRule ^thank_you$ thank_you.html [NC,L]
+RewriteRule ^manual_payment$ manual_payment.html [NC,L]
+RewriteRule ^requests$ requests.html [NC,L]
